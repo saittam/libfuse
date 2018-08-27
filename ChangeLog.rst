@@ -6,6 +6,9 @@ Unreleased Changes
   bcachefs, aufs and FAT filesystems.
 * libfuse may now be used as a Meson subproject.
 * Fix a few low-impact memory leaks.
+* Add --mount-fd parameter to pass FUSE file descriptor from the parent
+  process. This allows mounting to be handled by the parent so the FUSE
+  daemon can run fully unprivileged.
 
 libfuse 3.2.5 (2018-07-24)
 ==========================

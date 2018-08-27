@@ -147,8 +147,8 @@ static int fuse_helper_opt_proc(void *data, const char *arg, int key,
 	switch (key) {
 	case FUSE_OPT_KEY_NONOPT:
 		if (!opts->mountpoint) {
-			char mountpoint[PATH_MAX];
-			if (realpath(arg, mountpoint) == NULL) {
+			char mountpoint[PATH_MAX] = "";
+			if (*arg && realpath(arg, mountpoint) == NULL) {
 				fprintf(stderr,
 					"fuse: bad mount point `%s': %s\n",
 					arg, strerror(errno));

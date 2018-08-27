@@ -2574,6 +2574,7 @@ static const struct fuse_opt fuse_ll_opts[] = {
 	LL_OPTION("-d", debug, 1),
 	LL_OPTION("--debug", debug, 1),
 	LL_OPTION("allow_root", deny_others, 1),
+	LL_OPTION("--mount-fd=%u", fd, -1),
 	FUSE_OPT_END
 };
 
@@ -2890,16 +2891,31 @@ int fuse_session_mount(struct fuse_session *se, const char *mountpoint)
 			close(fd);
 	} while (fd >= 0 && fd <= 2);
 
-	/* Open channel */
-	fd = fuse_kern_mount(mountpoint, se->mo);
-	if (fd == -1)
-		return -1;
-	se->fd = fd;
+	if (se->fd != -1) {
+		/*
+		 * To allow FUSE daemons to run without privileges, the caller
+		 * may open /dev/fuse before launching the daemon and pass on
+		 * the file descriptor via the --mount-fd  option. The parent
+		 * takes care of mounting, so there's no need to mount here and
+		 * consequently the mountpoint parameter should be the empty
+		 * string.
+		 */
+		if (*mountpoint) {
+			fprintf(stderr, "fuse: Mountpoint should be empty when --mount-fd is specified.\n");
+			return -1;
+		}
+	} else {
+		/* Open channel */
+		fd = fuse_kern_mount(mountpoint, se->mo);
+		if (fd == -1)
+			return -1;
+		se->fd = fd;
 
-	/* Save mountpoint */
-	se->mountpoint = strdup(mountpoint);
-	if (se->mountpoint == NULL)
-		goto error_out;
+		/* Save mountpoint */
+		se->mountpoint = strdup(mountpoint);
+		if (se->mountpoint == NULL)
+			goto error_out;
+	}
 
 	return 0;
 
@@ -2915,9 +2931,11 @@ int fuse_session_fd(struct fuse_session *se)
 
 void fuse_session_unmount(struct fuse_session *se)
 {
-	fuse_kern_unmount(se->mountpoint, se->fd);
-	free(se->mountpoint);
-	se->mountpoint = NULL;
+	if (se->mountpoint != NULL) {
+		fuse_kern_unmount(se->mountpoint, se->fd);
+		free(se->mountpoint);
+		se->mountpoint = NULL;
+	}
 }
 
 #ifdef linux
