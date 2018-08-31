@@ -4,6 +4,9 @@ Unreleased Changes
 * Allow open `/dev/fuse` file descriptors to be passed via mountpoints of the
   special format `/dev/fd/%u`. This allows mounting to be handled by the parent
   so the FUSE filesystem process can run fully unprivileged.
+* Add an `unprivileged` option to mount.fuse3 which causes it open `/dev/fuse`
+  and mount the file system itself, then run the FUSE file filesystem fully
+  unprivileged and unable to re-acquire privilege via setuid, fscaps, etc.
 
 libfuse 3.2.6 (2018-08-31)
 ==========================
