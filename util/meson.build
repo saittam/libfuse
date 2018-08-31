@@ -13,8 +13,9 @@ executable('fusermount3', ['fusermount.c', mount_util_c],
            install: true,
            install_dir: get_option('bindir'))
 
-executable('mount.fuse3', ['mount.fuse.c'], 
+executable('mount.fuse3', ['mount.fuse.c'],
            include_directories: include_dirs,
+           link_with: [ libfuse ],
            install: true,
            install_dir: get_option('sbindir'))
 

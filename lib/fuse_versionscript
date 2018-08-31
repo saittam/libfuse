@@ -1,5 +1,8 @@
 FUSE_3.0 {
 	global:
+		parse_mount_opts;
+		fuse_kern_mount;
+		fuse_kern_unmount;
 		fuse_destroy;
 		fuse_exit;
 		fuse_loop;

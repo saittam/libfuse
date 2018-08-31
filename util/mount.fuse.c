@@ -14,6 +14,19 @@
 #include <unistd.h>
 #include <errno.h>
 #include <stdint.h>
+#include <fcntl.h>
+#include <pwd.h>
+#include <sys/wait.h>
+
+#ifdef linux
+#include <sys/prctl.h>
+#include <sys/capability.h>
+#include <linux/capability.h>
+#include <linux/securebits.h>
+#endif
+
+#define FUSE_USE_VERSION 32
+#include "lib/fuse_i.h"
 
 static char *progname;
 
@@ -88,10 +101,11 @@ int main(int argc, char *argv[])
 	char *basename;
 	char *options = NULL;
 	char *command = NULL;
-	char *setuid = NULL;
+	char *setuid_name = NULL;
 	int i;
 	int dev = 1;
 	int suid = 1;
+	int drop_privs = 0;
 
 	progname = argv[0];
 	basename = strrchr(argv[0], '/');
@@ -167,7 +181,10 @@ int main(int argc, char *argv[])
 							      "_netdev",
 							      NULL};
 				if (strncmp(opt, "setuid=", 7) == 0) {
-					setuid = xstrdup(opt + 7);
+					setuid_name = xstrdup(opt + 7);
+					ignore = 1;
+				} else if (strcmp(opt, "drop_privs") == 0) {
+					drop_privs = 1;
 					ignore = 1;
 				}
 				for (j = 0; ignore_opts[j]; j++)
@@ -212,24 +229,68 @@ int main(int argc, char *argv[])
 	add_arg(&command, type);
 	if (source)
 		add_arg(&command, source);
-	add_arg(&command, mountpoint);
+	add_arg(&command, drop_privs ? "" : mountpoint);
 	if (options) {
 		add_arg(&command, "-o");
 		add_arg(&command, options);
 	}
 
-	if (setuid && setuid[0]) {
-		char *sucommand = command;
-		command = NULL;
-		add_arg(&command, "su");
-		add_arg(&command, "-");
-		add_arg(&command, setuid);
-		add_arg(&command, "-c");
-		add_arg(&command, sucommand);
+	if (setuid_name && setuid_name[0]) {
+		struct passwd *pwd = getpwnam(setuid_name);
+		if (setgid(pwd->pw_gid) == -1 || setuid(pwd->pw_uid) == -1) {
+			fprintf(stderr, "%s: Failed to setuid to %s: %s\n",
+				progname, setuid_name, strerror(errno));
+			exit(1);
+		}
 	} else if (!getenv("HOME")) {
 		/* Hack to make filesystems work in the boot environment */
 		setenv("HOME", "/root", 0);
 	}
+
+#ifdef linux
+	if (drop_privs)  {
+		const char *args_argv[] = { progname, "-o", options };
+		struct fuse_args args = {
+			.argv = (char**)args_argv,
+			.argc = sizeof(args_argv) / sizeof(args_argv[0]),
+			.allocated = 0,
+		};
+		struct mount_opts* mo = parse_mount_opts(&args);
+		if (mo == NULL) {
+			exit(1);
+		}
+		int fuse_fd = fuse_kern_mount(mountpoint, mo);
+		if (fuse_fd == -1) {
+			exit(1);
+		}
+
+		int flags = fcntl(fuse_fd, F_GETFD);
+		if (flags == -1 ||
+		    fcntl(fuse_fd, F_SETFD, flags & ~FD_CLOEXEC) == -1) {
+			fprintf(stderr, "%s: Failed to clear FD_CLOEXEC: %s\n",
+				progname, strerror(errno));
+		}
+
+		char mount_fd[20];
+		snprintf(mount_fd, sizeof(mount_fd), "--mount-fd=%u", fuse_fd);
+		add_arg(&command, mount_fd);
+
+		// Prevent re-acquisition of privileges.
+		if (prctl(PR_SET_NO_NEW_PRIVS, 1) == -1) {
+			fprintf(stderr, "%s: Failed to set no_new_privs: %s\n",
+				progname, strerror(errno));
+		}
+
+		// Clear capabilities
+		struct __user_cap_header_struct header = {
+			.version = _LINUX_CAPABILITY_VERSION_3,
+			.pid = 0,
+		};
+		struct __user_cap_data_struct data[2];
+		memset(data, 0, sizeof(data));
+		capset(&header, data);
+	}
+#endif
 
 	execl("/bin/sh", "/bin/sh", "-c", command, NULL);
 	fprintf(stderr, "%s: failed to execute /bin/sh: %s\n", progname,
